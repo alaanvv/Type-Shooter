@@ -14,6 +14,7 @@
 #define VEC2_COPY(v1, v2) { v2[0] = v1[0]; v2[1] = v1[1]; }
 #define VEC2_COMPARE(v1, v2) (v1[0] == v2[0] && v1[1] == v2[1])
 #define VEC3_COPY(v1, v2) { v2[0] = v1[0]; v2[1] = v1[1]; v2[2] = v1[2]; }
+#define VEC3_ADD(v1, v2) { v1[0] += v2[0]; v1[1] += v2[1]; v1[2] += v2[2]; }
 #define VEC3_COMPARE(v1, v2) (v1[0] == v2[0] && v1[1] == v2[1] && v1[2] == v2[2])
 #define VERTEX_COPY(from, to) { for (u8 i_ = 0; i_ < 8; i_++) to[i_] = from[i_]; }
 #define VEC2(a, b)    (vec2) { a, b }
