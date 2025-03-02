@@ -5,8 +5,6 @@
 // Menus
 // Add songs
 // Refactor
-// Clear depth buffer before drawing text
-// Danger indicator
 
 #include "canvas.h"
 #include <string.h>
@@ -20,7 +18,7 @@
 
 #define UPSCALE 0.5
 
-#define MAX_ROWS   5
+#define MAX_ROWS   4
 #define MAX_COLS   5
 #define MAX_OFFSET 0.6 * MAX_COLS
 #define DISTANCE   20
@@ -64,8 +62,8 @@ Bullet bullets[2][MAX_COLS];
 vec3   stars[200];
 WordPack wp = { 0 };
 
-f32 recoil = 0, blink = 0, x_offset = 0;
-u8 rows = MAX_ROWS, difficulty = 0;
+f32 recoil = 0, blink = 0, x_offset = 0, enemy_bullet_speed;
+u8 rows = MAX_ROWS, cols = MAX_COLS, difficulty = 0;
 i8 dir = 1;
 
 // ---
@@ -83,12 +81,19 @@ void move_to(vec3 from, vec3 to, f32 speed) {
 }
 
 void init_enemies() {
-  for (u8 i = 0; i < MAX_COLS; i++) {
+  for (u8 i = 0; i < cols; i++) {
     enemies[0][i].next_shoot = glfwGetTime() + RAND(2, 9);
     enemies[0][i].bullet.active = 0;
     enemies[0][i].prog = 0;
     strcpy(enemies[0][i].word, wp.words[RAND(0, wp.size)]);
   }
+}
+
+void init_level() {
+  difficulty++;
+  rows = MIN(MAX_ROWS, 1 + difficulty);
+  cols = MIN(MAX_COLS, MAX(2, difficulty));
+  enemy_bullet_speed = 0.04 + (MIN(10, MAX(1, difficulty - 3)) / 10.0 * 0.05);
 }
 
 void init_game() {
@@ -104,15 +109,13 @@ void init_game() {
   fclose(file);
 
   init_enemies();
+  init_level();
 }
 
 void move_rows() {
   blink = 5;
   rows = MAX(0, rows - 1);
-  if (!rows) {
-    difficulty++;
-    rows = MAX_ROWS;
-  }
+  if (!rows) init_level();
   init_enemies();
 }
 
@@ -126,10 +129,10 @@ void game_tick(Camera cam) {
   if (x_offset < -MAX_OFFSET && dir == -1) dir =  1;
   x_offset += dir * SPEED;
   for (u8 i = 0; i < rows; i++)
-    for (u8 j = 0; j < MAX_COLS; j++)
-      VEC3_COPY(VEC3((j - (MAX_COLS - 1) / 2.0) * GAP + x_offset * (i % 2 ? 1 : -1) * (rows % 2 ? 1 : -1), i * ROW_HEIGHT, i * ROW_SPACE), enemies[i][j].pos);
+    for (u8 j = 0; j < cols; j++)
+      VEC3_COPY(VEC3((j - (cols - 1) / 2.0) * GAP + x_offset * (i % 2 ? 1 : -1) * (rows % 2 ? 1 : -1), i * ROW_HEIGHT, i * ROW_SPACE), enemies[i][j].pos);
 
-  for (u8 i = 0; i < MAX_COLS; i++) {
+  for (u8 i = 0; i < cols; i++) {
     // Enemy shoot
     if (enemies[0][i].next_shoot - glfwGetTime() < 0 && !enemies[0][i].bullet.active && enemies[0][i].word[0]) {
       enemies[0][i].bullet.active = 1;
@@ -142,7 +145,7 @@ void game_tick(Camera cam) {
 
     // Move enemy bullet
     if (enemies[0][i].bullet.active) {
-      move_to(enemies[0][i].bullet.pos, VEC3(0.5 * (i-(MAX_COLS/2.0)), -0.2, DISTANCE), 0.04);
+      move_to(enemies[0][i].bullet.pos, VEC3(0.5 * (i-(cols/2.0)), -0.2, DISTANCE), enemy_bullet_speed);
 
       // Lose
       if (enemies[0][i].bullet.pos[2] >= DISTANCE - 1) {
@@ -157,9 +160,9 @@ void game_tick(Camera cam) {
       bullets[0][i].rotation = x_angle(enemies[0][i].pos, bullets[0][i].pos);
       if (bullets[0][i].pos[2] <= 1) {
         bullets[0][i].active = 0;
-        for (u8 i = 0; i < MAX_COLS; i++) {
+        for (u8 i = 0; i < cols; i++) {
           if (enemies[0][i].word[0]) break;
-          if (i != MAX_COLS - 1) continue;
+          if (i != cols - 1) continue;
           move_rows();
         }
       }
@@ -207,7 +210,7 @@ void shot(u8 bullet, u8 target) {
 }
 
 void char_press(GLFWwindow* window, u32 key) {
-  for (u8 i = 0; i < MAX_COLS; i++) {
+  for (u8 i = 0; i < cols; i++) {
     u8 r = insert_input(enemies[0][i].word, key);
     if (r == 1) enemies[0][i].prog = 0;
     if (r == 2) enemies[0][i].prog += 0.1;
@@ -281,7 +284,8 @@ int main() {
   Font font = { GL_TEXTURE0, 60, 30, 5, 7.0 / 5 };
 
   // Color
-  vec3 enemy_bullet = PASTEL_YELLOW;
+  vec3 enemy_bullet   = PASTEL_YELLOW;
+  vec3 enemy_bullet_d = DEEP_RED;
 
   // Shader
   hud_shader = shader_create_program("shd/hud.v", "shd/hud.f");
@@ -305,14 +309,13 @@ int main() {
     model_draw(ship, shader);
 
     for (u8 i = 0; i < rows; i++)
-      for (u8 j = 0; j < MAX_COLS; j++) {
-        // Skip dead enemies
-        if (!i && !enemies[i][j].word[0] && !bullets[i][j].active) continue;
-
+      for (u8 j = 0; j < cols; j++) {
         // Draw enemy
-        model_bind(enemy, shader);
-        glm_translate(enemy->model, enemies[i][j].pos);
-        model_draw(enemy, shader);
+        if (i || enemies[i][j].word[0] || bullets[i][j].active) {
+          model_bind(enemy, shader);
+          glm_translate(enemy->model, enemies[i][j].pos);
+          model_draw(enemy, shader);
+        }
 
         model_bind(bullet, shader);
         // Draw player's bullet to enemy
@@ -325,6 +328,10 @@ int main() {
 
         // Draw enemy bullet
         canvas_uni3f(shader, "MAT.COL", enemy_bullet[0], enemy_bullet[1], enemy_bullet[2]);
+        if      (enemies[0][j].bullet.pos[2] >= DISTANCE - 1 - 40  * enemy_bullet_speed) canvas_uni3f(shader, "MAT.COL", enemy_bullet_d[0], enemy_bullet_d[1], enemy_bullet_d[2]);
+        else if (enemies[0][j].bullet.pos[2] >= DISTANCE - 1 - 120  * enemy_bullet_speed) {if (sin(glfwGetTime() * 30) > 0) canvas_uni3f(shader, "MAT.COL", enemy_bullet_d[0], enemy_bullet_d[1], enemy_bullet_d[2]);}
+        else if (enemies[0][j].bullet.pos[2] >= DISTANCE - 1 - 180 * enemy_bullet_speed) {if (sin(glfwGetTime() * 20) > 0) canvas_uni3f(shader, "MAT.COL", enemy_bullet_d[0], enemy_bullet_d[1], enemy_bullet_d[2]);}
+        else if (enemies[0][j].bullet.pos[2] >= DISTANCE - 1 - 240 * enemy_bullet_speed) {if (sin(glfwGetTime() * 10) > 0) canvas_uni3f(shader, "MAT.COL", enemy_bullet_d[0], enemy_bullet_d[1], enemy_bullet_d[2]);}
         if (enemies[0][j].bullet.active)
           draw_bullet(shader, bullet, enemies[0][j].bullet.pos, enemies[0][j].bullet.rotation);
       }
@@ -339,12 +346,11 @@ int main() {
     glBlitNamedFramebuffer(0, lowres_fbo, 0, 0, cam.width, cam.height, 0, 0, cam.width * UPSCALE, cam.height * UPSCALE, GL_COLOR_BUFFER_BIT, GL_NEAREST);
     glBlitNamedFramebuffer(lowres_fbo, 0, 0, 0, cam.width * UPSCALE, cam.height * UPSCALE, 0, 0, cam.width, cam.height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
-    for (u8 i = 0; i < MAX_COLS; i++) {
+    glClear(GL_DEPTH_BUFFER_BIT);
+    for (u8 i = 0; i < cols; i++) {
       draw_text(shader, enemies[0][i].word, VEC3(enemies[0][i].pos[0] - canvas_text_width(enemies[0][i].word, font, 0.01) / 2, 1.3, 0), font, m_text, 0.01, (vec3) PURPLE, enemies[0][i].prog);
-      glDisable(GL_DEPTH_TEST);
       if (enemies[0][i].bullet.active)
         draw_text(shader, enemies[0][i].bullet.word, VEC3(enemies[0][i].bullet.pos[0] - canvas_text_width(enemies[0][i].bullet.word, font, 0.01) / 2, enemies[0][i].bullet.pos[1] - 1.3, enemies[0][i].bullet.pos[2]), font, m_text, 0.01, (vec3) PURPLE, enemies[0][i].bullet.prog);
-      glEnable(GL_DEPTH_TEST);
     }
 
     if (blink)
