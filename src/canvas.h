@@ -19,6 +19,7 @@
 #define VERTEX_COPY(from, to) { for (u8 i_ = 0; i_ < 8; i_++) to[i_] = from[i_]; }
 #define VEC2(a, b)    (vec2) { a, b }
 #define VEC3(a, b, c) (vec3) { a, b, c }
+#define LEN(v) ( sizeof(v) / sizeof(v[0]) )
 
 #define PI  3.14159
 #define TAU PI * 2
