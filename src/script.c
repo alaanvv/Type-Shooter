@@ -33,9 +33,19 @@ typedef enum {
 } Stage;
 
 typedef struct {
+  int running;
+  float start, duration;
+} Animation;
+
+typedef struct {
   char words[1000][32];
   u16 size;
 } WordPack;
+
+typedef struct {
+  char w[32];
+  f32 prog;
+} TypableWord;
 
 typedef struct {
   vec3 pos;
@@ -44,16 +54,16 @@ typedef struct {
 } Bullet;
 
 typedef struct {
-  char word[32];
+  TypableWord word;
   vec3 pos;
   u8 active;
-  f32 prog, rotation;
+  f32 rotation;
 } EnemyBullet;
 
 typedef struct {
   EnemyBullet bullet;
-  char word[32];
-  f32 prog, next_shoot;
+  TypableWord word;
+  f32 next_shoot;
   vec3 pos;
 } Enemy;
 
@@ -82,13 +92,16 @@ void draw_bullet(Model* model, vec3 pos, f32 rotation);
 void draw_text(char* word, vec3 pos, Font font, Material mat, f32 size, vec3 typed_color, f32 prog);
 int  should_stage_in_event();
 void set_stage(Stage stage);
+void start_transition(Stage to);
+void draw_transition();
 
 // ---
 
+TypableWord play, easy, normal, hardcore;
 Enemy  enemies[MAX_ROWS][MAX_COLS];
 Bullet bullets[2][MAX_COLS];
-vec3   stars[200];
 WordPack wp = { 0 };
+vec3 stars[200];
 Stage stage;
 u8 stage_in_event;
 
@@ -96,20 +109,14 @@ f32 recoil = 0, blink = 0, x_offset = 0, enemy_bullet_speed;
 u8 rows = MAX_ROWS, cols = MAX_COLS, difficulty = 0;
 i8 dir = 1;
 
-char menu_play[32];
-char menu_easy[32];
-char menu_normal[32];
-char menu_hardcore[32];
-f32  menu_prog = 0;
-f32  menu_e    = 0;
-f32  menu_n    = 0;
-f32  menu_hc   = 0;
-
 // ---
 
 Camera cam = { PI4, 0.01, 100 };
-u32  shader;
+u32  shader, hud_shader;
 f32  fps;
+Animation transition = { 0, 0, 0.5 };
+Stage transition_to;
+u8 transitioned = 0;
 
 Material m_ship     = { GRAY,          0.5, 0.5 };
 Material m_enemy    = { DEEP_GREEN,    0.5, 0.5 };
@@ -160,6 +167,9 @@ void init() {
 
   canvas_create_texture(GL_TEXTURE0, "img/font.ppm",  TEXTURE_DEFAULT);
 
+  hud_shader = shader_create_program("shd/hud.v", "shd/hud.f");
+  generate_ortho_mat(&cam, hud_shader);
+
   shader = shader_create_program("shd/obj.v", "shd/obj.f");
   generate_proj_mat(&cam, shader);
   generate_view_mat(&cam, shader);
@@ -187,22 +197,22 @@ void init() {
 
 void stage_start() {
   if (should_stage_in_event()) {
-    strcpy(menu_play, "play");
+    strcpy(play.w, "play");
+    play.prog = 0;
   }
-
-  if (blink)  blink  = MAX(blink  - 0.100, 0);
 
   draw_start();
 }
 
 void stage_mode() {
   if (should_stage_in_event()) {
-    strcpy(menu_easy, "easy");
-    strcpy(menu_normal, "normal");
-    strcpy(menu_hardcore, "hardcore");
+    strcpy(easy.w, "easy");
+    easy.prog = 0;
+    strcpy(normal.w, "normal");
+    normal.prog = 0;
+    strcpy(hardcore.w, "hardcore");
+    hardcore.prog = 0;
   }
-
-  if (blink)  blink  = MAX(blink  - 0.100, 0);
 
   draw_mode();
 }
@@ -243,18 +253,17 @@ void move_enemy(u8 i, u8 j) {
 }
 
 void enemy_shoot(u8 i) {
-  if (enemies[0][i].next_shoot - glfwGetTime() >= 0 || enemies[0][i].bullet.active || !enemies[0][i].word[0]) return;
-  enemies[0][i].bullet.prog = 0;
+  if (enemies[0][i].next_shoot - glfwGetTime() >= 0 || enemies[0][i].bullet.active || !enemies[0][i].word.w[0]) return;
+  enemies[0][i].bullet.word.prog = 0;
   enemies[0][i].bullet.active = 1;
   VEC3_COPY(enemies[0][i].pos, enemies[0][i].bullet.pos);
   enemies[0][i].bullet.rotation = x_angle(enemies[0][i].bullet.pos, VEC3(0, 0, 0));
   enemies[0][i].next_shoot = glfwGetTime() + MAX(1, MIN(20, RAND(10, 20) - difficulty));
-  strcpy(enemies[0][i].bullet.word, wp.words[RAND(0, wp.size)]);
+  strcpy(enemies[0][i].bullet.word.w, wp.words[RAND(0, wp.size)]);
 }
 
 void lose() {
-  blink = 10;
-  set_stage(START_SCREEN);
+  start_transition(START_SCREEN);
 }
 
 void move_enemy_bullet(u8 i) {
@@ -268,7 +277,7 @@ void move_enemy_bullet(u8 i) {
 
 void check_enemies() {
   for (u8 i = 0; i < cols; i++) {
-    if (enemies[0][i].word[0]) break;
+    if (enemies[0][i].word.w[0]) break;
     if (i != cols - 1) continue;
     move_rows();
   }
@@ -298,8 +307,8 @@ void init_enemies() {
   for (u8 i = 0; i < cols; i++) {
     enemies[0][i].next_shoot = glfwGetTime() + RAND(2, 9) + (5 / (0.1 * 60));
     enemies[0][i].bullet.active = 0;
-    enemies[0][i].prog = 0;
-    strcpy(enemies[0][i].word, wp.words[RAND(0, wp.size)]);
+    enemies[0][i].word.prog = 0;
+    strcpy(enemies[0][i].word.w, wp.words[RAND(0, wp.size)]);
   }
 }
 
@@ -342,57 +351,44 @@ void shot(u8 bullet, u8 target) {
 void char_press(GLFWwindow* window, u32 key) {
   if (stage == GAME_SCREEN) {
     for (u8 i = 0; i < cols; i++) {
-      u8 r = insert_input(enemies[0][i].word, key);
-      if (r == 1) enemies[0][i].prog = 0;
-      if (r == 2) enemies[0][i].prog += 0.1;
+      u8 r = insert_input(enemies[0][i].word.w, key);
+      if (r == 1) enemies[0][i].word.prog = 0;
+      if (r == 2) enemies[0][i].word.prog += 0.1;
       if (r == 3) shot(0, i);
 
-      r = insert_input(enemies[0][i].bullet.word, key);
-      if (r == 1) enemies[0][i].bullet.prog = 0;
-      if (r == 2) enemies[0][i].bullet.prog += 0.1;
+      r = insert_input(enemies[0][i].bullet.word.w, key);
+      if (r == 1) enemies[0][i].bullet.word.prog = 0;
+      if (r == 2) enemies[0][i].bullet.word.prog += 0.1;
       if (r == 3) shot(1, i);
     }
   }
   else if (stage == START_SCREEN) {
-    u8 r = insert_input(menu_play, key);
-    if (r == 1) menu_prog = 0;
-    if (r == 2) menu_prog += 0.1;
-    if (r == 3) {
-      blink = 5;
-      set_stage(MODE_SCREEN);
-    }
+    u8 r = insert_input(play.w, key);
+    if (r == 1) play.prog = 0;
+    if (r == 2) play.prog += 0.1;
+    if (r == 3) start_transition(MODE_SCREEN);
   }
   else if (stage == MODE_SCREEN) {
-    u8 r = insert_input(menu_play, key);
-    if (r == 1) menu_prog = 0;
-    if (r == 2) menu_prog += 0.1;
+    u8 r = insert_input(easy.w, key);
+    if (r == 1) easy.prog = 0;
+    if (r == 2) easy.prog += 0.1;
     if (r == 3) {
-      blink = 5;
-      set_stage(GAME_SCREEN);
-    }
-    r = insert_input(menu_easy, key);
-    if (r == 1) menu_e = 0;
-    if (r == 2) menu_e += 0.1;
-    if (r == 3) {
-      blink = 5;
       difficulty = 0;
-      set_stage(GAME_SCREEN);
+      start_transition(GAME_SCREEN);
     }
-    r = insert_input(menu_normal, key);
-    if (r == 1) menu_n = 0;
-    if (r == 2) menu_n += 0.1;
+    r = insert_input(normal.w, key);
+    if (r == 1) normal.prog = 0;
+    if (r == 2) normal.prog += 0.1;
     if (r == 3) {
-      blink = 5;
       difficulty = 2;
-      set_stage(GAME_SCREEN);
+      start_transition(GAME_SCREEN);
     }
-    r = insert_input(menu_hardcore, key);
-    if (r == 1) menu_hc = 0;
-    if (r == 2) menu_hc += 0.1;
+    r = insert_input(hardcore.w, key);
+    if (r == 1) hardcore.prog = 0;
+    if (r == 2) hardcore.prog += 0.1;
     if (r == 3) {
-      blink = 5;
       difficulty = 5;
-      set_stage(GAME_SCREEN);
+      start_transition(GAME_SCREEN);
     }
   }
 }
@@ -407,7 +403,7 @@ void draw_game() {
 
   for (u8 i = 0; i < rows; i++)
     for (u8 j = 0; j < cols; j++) {
-      if (i || enemies[i][j].word[0] || bullets[i][j].active) {
+      if (i || enemies[i][j].word.w[0] || bullets[i][j].active) {
         model_bind(enemy, shader);
         glm_translate(enemy->model, enemies[i][j].pos);
         model_draw(enemy, shader);
@@ -437,10 +433,11 @@ void draw_game() {
 
   glClear(GL_DEPTH_BUFFER_BIT);
   for (u8 i = 0; i < cols; i++) {
-    draw_text(enemies[0][i].word, VEC3(enemies[0][i].pos[0] - canvas_text_width(enemies[0][i].word, font, 0.01) / 2, 1.3, -DISTANCE), font, m_text, 0.01, (vec3) PURPLE, enemies[0][i].prog);
+    draw_text(enemies[0][i].word.w, VEC3(enemies[0][i].pos[0] - canvas_text_width(enemies[0][i].word.w, font, 0.01) / 2, 1.3, -DISTANCE), font, m_text, 0.01, (vec3) PURPLE, enemies[0][i].word.prog);
     if (enemies[0][i].bullet.active)
-      draw_text(enemies[0][i].bullet.word, VEC3(enemies[0][i].bullet.pos[0] - canvas_text_width(enemies[0][i].bullet.word, font, 0.01) / 2, enemies[0][i].bullet.pos[1] - 1.3, enemies[0][i].bullet.pos[2]), font, m_text, 0.01, (vec3) PURPLE, enemies[0][i].bullet.prog);
+      draw_text(enemies[0][i].bullet.word.w, VEC3(enemies[0][i].bullet.pos[0] - canvas_text_width(enemies[0][i].bullet.word.w, font, 0.01) / 2, enemies[0][i].bullet.pos[1] - 1.3, enemies[0][i].bullet.pos[2]), font, m_text, 0.01, (vec3) PURPLE, enemies[0][i].bullet.word.prog);
   }
+  draw_transition();
 }
 
 void draw_start() {
@@ -452,15 +449,14 @@ void draw_start() {
   canvas_draw_text(shader, "type shooter", -canvas_text_width("type shooter", font, 0.05) / 2, 2.9, -DISTANCE - 0.5, 0.05, font, m_text, VEC3(0, 0, 0));
   VEC3_COPY(_c, m_text.col);
 
-  draw_text(menu_play, VEC3(-canvas_text_width(menu_play, font, 0.03) / 2, -2, -DISTANCE), font, m_text, 0.03, (vec3) PURPLE, menu_prog);
+  draw_text(play.w, VEC3(-canvas_text_width(play.w, font, 0.03) / 2, -2, -DISTANCE), font, m_text, 0.03, (vec3) PURPLE, play.prog);
 
   draw_stars();
   draw_ship();
+  draw_transition();
 }
 
 void draw_mode() {
-  if (blink) return;
-
   vec3 _c;
   VEC3_COPY(m_text.col, _c);
   VEC3_COPY((vec3) PURPLE, m_text.col);
@@ -469,12 +465,13 @@ void draw_mode() {
   canvas_draw_text(shader, "type shooter", -canvas_text_width("type shooter", font, 0.05) / 2, 2.9, -DISTANCE - 0.5, 0.05, font, m_text, VEC3(0, 0, 0));
   VEC3_COPY(_c, m_text.col);
 
-  draw_text(menu_easy,   VEC3(-canvas_text_width(menu_easy,   font, 0.03) / 2, 0, -DISTANCE), font, m_text, 0.03, (vec3) PURPLE, menu_e);
-  draw_text(menu_normal,     VEC3(-canvas_text_width(menu_normal,     font, 0.03) / 2, -2.2, -DISTANCE), font, m_text, 0.03, (vec3) PURPLE, menu_n * 2);
-  draw_text(menu_hardcore, VEC3(-canvas_text_width(menu_hardcore, font, 0.03) / 2, -4.4, -DISTANCE), font, m_text, 0.03, (vec3) DEEP_RED, menu_hc * 3);
+  draw_text(easy.w,   VEC3(-canvas_text_width(easy.w,   font, 0.03) / 2, 0, -DISTANCE), font, m_text, 0.03, (vec3) PURPLE, easy.prog);
+  draw_text(normal.w,     VEC3(-canvas_text_width(normal.w,     font, 0.03) / 2, -2.2, -DISTANCE), font, m_text, 0.03, (vec3) PURPLE, normal.prog * 2);
+  draw_text(hardcore.w, VEC3(-canvas_text_width(hardcore.w, font, 0.03) / 2, -4.4, -DISTANCE), font, m_text, 0.03, (vec3) DEEP_RED, hardcore.prog * 3);
 
   draw_stars();
   draw_ship();
+  draw_transition();
 }
 
 // ---
@@ -530,6 +527,38 @@ int should_stage_in_event() {
 void set_stage(Stage _stage) {
   stage = _stage;
   stage_in_event = 0;
+}
+
+// ---
+
+void start_animation(Animation* anim) {
+  anim->start   = glfwGetTime();
+  anim->running = 1;
+}
+
+float animation_keyframe(Animation* anim) {
+  float x = (glfwGetTime() - anim->start);
+  if (x >= anim->duration) anim->running = 0;
+  return x;
+}
+
+void start_transition(Stage to) {
+  start_animation(&transition);
+  transition_to = to;
+  transitioned = 0;
+}
+
+void draw_transition() {
+  if (!transition.running) return;
+  float x = animation_keyframe(&transition);
+  if (x >= transition.duration / 2 && !transitioned) {
+    set_stage(transition_to);
+    transitioned = 1;
+  }
+
+  glUseProgram(hud_shader);
+  hud_draw_rec(hud_shader, 0, VEC3(0, 0, 0), -cam.width + x / transition.duration * 2 * cam.width, 0, cam.width, cam.height);
+  glUseProgram(shader);
 }
 
 // ---
