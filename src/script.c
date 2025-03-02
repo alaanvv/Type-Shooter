@@ -1,7 +1,6 @@
 // TODO
 // Different enemies
 // Crosshair
-// Menus
 // Add songs
 
 #include "canvas.h"
@@ -66,20 +65,23 @@ void enemy_shoot(u8 i);
 void move_enemy_bullet(u8 i);
 void move_player_to_enemy_bullet(u8 i);
 void move_player_to_bullet_bullet(u8 i);
-void game_draw();
-f32 x_angle(vec3 from, vec3 to);
+void draw_game();
+f32  x_angle(vec3 from, vec3 to);
 void move_to(vec3 from, vec3 to, f32 speed);
 void init_enemies();
 void move_rows();
-void stage_game(Camera cam);
-u8 insert_input(char* word, u32 key);
-void shot(u8 bullet, u8 target);
+void stage_start();
+void draw_start();
+void draw_ship();
+void draw_stars();
+void stage_game();
+void stage_mode();
+void draw_mode();
 void char_press(GLFWwindow* window, u32 key);
 void draw_bullet(Model* model, vec3 pos, f32 rotation);
 void draw_text(char* word, vec3 pos, Font font, Material mat, f32 size, vec3 typed_color, f32 prog);
-int should_stage_in_event();
+int  should_stage_in_event();
 void set_stage(Stage stage);
-void lose();
 
 // ---
 
@@ -87,12 +89,21 @@ Enemy  enemies[MAX_ROWS][MAX_COLS];
 Bullet bullets[2][MAX_COLS];
 vec3   stars[200];
 WordPack wp = { 0 };
-Stage stage = GAME_SCREEN;
+Stage stage;
 u8 stage_in_event;
 
 f32 recoil = 0, blink = 0, x_offset = 0, enemy_bullet_speed;
 u8 rows = MAX_ROWS, cols = MAX_COLS, difficulty = 0;
 i8 dir = 1;
+
+char menu_play[32];
+char menu_easy[32];
+char menu_normal[32];
+char menu_hardcore[32];
+f32  menu_prog = 0;
+f32  menu_e    = 0;
+f32  menu_n    = 0;
+f32  menu_hc   = 0;
 
 // ---
 
@@ -119,7 +130,9 @@ int main() {
   init();
 
   while (!glfwWindowShouldClose(cam.window)) {
-    if (stage == GAME_SCREEN) stage_game(cam);
+    if      (stage == START_SCREEN) stage_start();
+    else if (stage ==  MODE_SCREEN) stage_mode();
+    else if (stage ==  GAME_SCREEN) stage_game();
 
     glfwSwapBuffers(cam.window);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -167,18 +180,40 @@ void init() {
     strcpy(wp.words[wp.size++], buffer);
   fclose(file);
 
-  init_enemies();
-  set_stage(GAME_SCREEN);
+  set_stage(START_SCREEN);
 }
 
 // ---
 
-void stage_game(Camera cam) {
+void stage_start() {
+  if (should_stage_in_event()) {
+    strcpy(menu_play, "play");
+  }
+
+  if (blink)  blink  = MAX(blink  - 0.100, 0);
+
+  draw_start();
+}
+
+void stage_mode() {
+  if (should_stage_in_event()) {
+    strcpy(menu_easy, "easy");
+    strcpy(menu_normal, "normal");
+    strcpy(menu_hardcore, "hardcore");
+  }
+
+  if (blink)  blink  = MAX(blink  - 0.100, 0);
+
+  draw_mode();
+}
+
+void stage_game() {
   if (should_stage_in_event()) {
     difficulty++;
     rows = MIN(MAX_ROWS, 1 + difficulty);
     cols = MIN(MAX_COLS, MAX(2, difficulty));
     enemy_bullet_speed = 0.04 + (MIN(10, MAX(1, difficulty - 3)) / 10.0 * 0.05);
+    init_enemies();
   }
 
   // Decrease stuff
@@ -190,15 +225,15 @@ void stage_game(Camera cam) {
   x_offset += dir * SPEED;
 
   for (u8 i = 0; i < cols; i++) {
-    for (u8 j = 0; j < cols; j++)
-      move_enemy(i, j);
+    for (u8 j = 0; j < rows; j++)
+      move_enemy(j, i);
     enemy_shoot(i);
     move_enemy_bullet(i);
     move_player_to_enemy_bullet(i);
     move_player_to_bullet_bullet(i);
   }
 
-  game_draw();
+  draw_game();
 }
 
 // ---
@@ -218,7 +253,8 @@ void enemy_shoot(u8 i) {
 }
 
 void lose() {
-  glfwSetWindowShouldClose(cam.window, 1);
+  blink = 10;
+  set_stage(START_SCREEN);
 }
 
 void move_enemy_bullet(u8 i) {
@@ -260,7 +296,7 @@ void move_player_to_bullet_bullet(u8 i) {
 
 void init_enemies() {
   for (u8 i = 0; i < cols; i++) {
-    enemies[0][i].next_shoot = glfwGetTime() + RAND(2, 9);
+    enemies[0][i].next_shoot = glfwGetTime() + RAND(2, 9) + (5 / (0.1 * 60));
     enemies[0][i].bullet.active = 0;
     enemies[0][i].prog = 0;
     strcpy(enemies[0][i].word, wp.words[RAND(0, wp.size)]);
@@ -304,27 +340,70 @@ void shot(u8 bullet, u8 target) {
 }
 
 void char_press(GLFWwindow* window, u32 key) {
-  for (u8 i = 0; i < cols; i++) {
-    u8 r = insert_input(enemies[0][i].word, key);
-    if (r == 1) enemies[0][i].prog = 0;
-    if (r == 2) enemies[0][i].prog += 0.1;
-    if (r == 3) shot(0, i);
+  if (stage == GAME_SCREEN) {
+    for (u8 i = 0; i < cols; i++) {
+      u8 r = insert_input(enemies[0][i].word, key);
+      if (r == 1) enemies[0][i].prog = 0;
+      if (r == 2) enemies[0][i].prog += 0.1;
+      if (r == 3) shot(0, i);
 
-    r = insert_input(enemies[0][i].bullet.word, key);
-    if (r == 1) enemies[0][i].bullet.prog = 0;
-    if (r == 2) enemies[0][i].bullet.prog += 0.1;
-    if (r == 3) shot(1, i);
+      r = insert_input(enemies[0][i].bullet.word, key);
+      if (r == 1) enemies[0][i].bullet.prog = 0;
+      if (r == 2) enemies[0][i].bullet.prog += 0.1;
+      if (r == 3) shot(1, i);
+    }
+  }
+  else if (stage == START_SCREEN) {
+    u8 r = insert_input(menu_play, key);
+    if (r == 1) menu_prog = 0;
+    if (r == 2) menu_prog += 0.1;
+    if (r == 3) {
+      blink = 5;
+      set_stage(MODE_SCREEN);
+    }
+  }
+  else if (stage == MODE_SCREEN) {
+    u8 r = insert_input(menu_play, key);
+    if (r == 1) menu_prog = 0;
+    if (r == 2) menu_prog += 0.1;
+    if (r == 3) {
+      blink = 5;
+      set_stage(GAME_SCREEN);
+    }
+    r = insert_input(menu_easy, key);
+    if (r == 1) menu_e = 0;
+    if (r == 2) menu_e += 0.1;
+    if (r == 3) {
+      blink = 5;
+      difficulty = 0;
+      set_stage(GAME_SCREEN);
+    }
+    r = insert_input(menu_normal, key);
+    if (r == 1) menu_n = 0;
+    if (r == 2) menu_n += 0.1;
+    if (r == 3) {
+      blink = 5;
+      difficulty = 2;
+      set_stage(GAME_SCREEN);
+    }
+    r = insert_input(menu_hardcore, key);
+    if (r == 1) menu_hc = 0;
+    if (r == 2) menu_hc += 0.1;
+    if (r == 3) {
+      blink = 5;
+      difficulty = 5;
+      set_stage(GAME_SCREEN);
+    }
   }
 }
 
 // ---
 
-void game_draw() {
+void draw_game() {
   if (blink) return;
 
-  model_bind(ship, shader);
-  glm_translate(ship->model, VEC3(0, 0, recoil));
-  model_draw(ship, shader);
+  draw_ship();
+  draw_stars();
 
   for (u8 i = 0; i < rows; i++)
     for (u8 j = 0; j < cols; j++) {
@@ -352,12 +431,6 @@ void game_draw() {
         draw_bullet(bullet, enemies[0][j].bullet.pos, enemies[0][j].bullet.rotation);
     }
 
-  for (u8 i = 0; i < LEN(stars); i++) {
-    model_bind(star, shader);
-    glm_translate(star->model, VEC3(stars[i][0], stars[i][1], stars[i][2]));
-    model_draw(star, shader);
-  }
-
   // Lowres
   glBlitNamedFramebuffer(0, lowres_fbo, 0, 0, cam.width, cam.height, 0, 0, cam.width * UPSCALE, cam.height * UPSCALE, GL_COLOR_BUFFER_BIT, GL_NEAREST);
   glBlitNamedFramebuffer(lowres_fbo, 0, 0, 0, cam.width * UPSCALE, cam.height * UPSCALE, 0, 0, cam.width, cam.height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
@@ -370,7 +443,55 @@ void game_draw() {
   }
 }
 
+void draw_start() {
+  vec3 _c;
+  VEC3_COPY(m_text.col, _c);
+  VEC3_COPY((vec3) PURPLE, m_text.col);
+  canvas_draw_text(shader, "type shooter", -canvas_text_width("type shooter", font, 0.05) / 2, 3, -DISTANCE, 0.05, font, m_text, VEC3(0, 0, 0));
+  VEC3_ADD(m_text.col, VEC3(-0.3, -0.3, -0.3));
+  canvas_draw_text(shader, "type shooter", -canvas_text_width("type shooter", font, 0.05) / 2, 2.9, -DISTANCE - 0.5, 0.05, font, m_text, VEC3(0, 0, 0));
+  VEC3_COPY(_c, m_text.col);
+
+  draw_text(menu_play, VEC3(-canvas_text_width(menu_play, font, 0.03) / 2, -2, -DISTANCE), font, m_text, 0.03, (vec3) PURPLE, menu_prog);
+
+  draw_stars();
+  draw_ship();
+}
+
+void draw_mode() {
+  if (blink) return;
+
+  vec3 _c;
+  VEC3_COPY(m_text.col, _c);
+  VEC3_COPY((vec3) PURPLE, m_text.col);
+  canvas_draw_text(shader, "type shooter", -canvas_text_width("type shooter", font, 0.05) / 2, 3, -DISTANCE, 0.05, font, m_text, VEC3(0, 0, 0));
+  VEC3_ADD(m_text.col, VEC3(-0.3, -0.3, -0.3));
+  canvas_draw_text(shader, "type shooter", -canvas_text_width("type shooter", font, 0.05) / 2, 2.9, -DISTANCE - 0.5, 0.05, font, m_text, VEC3(0, 0, 0));
+  VEC3_COPY(_c, m_text.col);
+
+  draw_text(menu_easy,   VEC3(-canvas_text_width(menu_easy,   font, 0.03) / 2, 0, -DISTANCE), font, m_text, 0.03, (vec3) PURPLE, menu_e);
+  draw_text(menu_normal,     VEC3(-canvas_text_width(menu_normal,     font, 0.03) / 2, -2.2, -DISTANCE), font, m_text, 0.03, (vec3) PURPLE, menu_n * 2);
+  draw_text(menu_hardcore, VEC3(-canvas_text_width(menu_hardcore, font, 0.03) / 2, -4.4, -DISTANCE), font, m_text, 0.03, (vec3) DEEP_RED, menu_hc * 3);
+
+  draw_stars();
+  draw_ship();
+}
+
 // ---
+
+void draw_ship() {
+  model_bind(ship, shader);
+  glm_translate(ship->model, VEC3(0, 0, recoil));
+  model_draw(ship, shader);
+}
+
+void draw_stars() {
+  for (u8 i = 0; i < LEN(stars); i++) {
+    model_bind(star, shader);
+    glm_translate(star->model, VEC3(stars[i][0], stars[i][1], stars[i][2]));
+    model_draw(star, shader);
+  }
+}
 
 void draw_bullet(Model* model, vec3 pos, f32 rotation) {
   glm_mat4_identity(model->model);
@@ -392,7 +513,7 @@ void draw_text(char* word, vec3 pos, Font font, Material mat, f32 size, vec3 typ
 
   vec3 _c;
   VEC3_COPY(mat.col, _c);
-  canvas_draw_text(shader, &word[j], pos[0] + canvas_text_width(typed, font, 0.01), pos[1], pos[2], size, font, mat, VEC3(0, 0, 0));
+  canvas_draw_text(shader, &word[j], pos[0] + canvas_text_width(typed, font, size), pos[1], pos[2], size, font, mat, VEC3(0, 0, 0));
   VEC3_COPY(typed_color, mat.col);
   canvas_draw_text(shader, typed,    pos[0],                                        pos[1], pos[2], size, font, mat, VEC3(0, 0, 0));
   VEC3_COPY(_c, mat.col);
@@ -406,8 +527,8 @@ int should_stage_in_event() {
   return !tmp;
 }
 
-void set_stage(Stage stage) {
-  stage = stage;
+void set_stage(Stage _stage) {
+  stage = _stage;
   stage_in_event = 0;
 }
 
