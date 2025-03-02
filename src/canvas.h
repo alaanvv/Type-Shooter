@@ -33,6 +33,7 @@
 #define PASTEL_PINK   { 1.00, 0.75, 0.79 }
 #define PASTEL_GREEN  { 0.60, 0.98, 0.60 }
 #define PASTEL_YELLOW { 1.00, 1.00, 0.60 }
+#define YELLOW        { 0.80, 0.80, 0.30 }
 #define PASTEL_PURPLE { 0.80, 0.70, 1.00 }
 #define DEEP_RED      { 0.60, 0.00, 0.00 }
 #define DEEP_BLUE     { 0.00, 0.00, 0.50 }
