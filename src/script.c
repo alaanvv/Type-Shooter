@@ -1,24 +1,14 @@
 #define MINIAUDIO_IMPLEMENTATION
-#define MAX_SOUNDS 10
 #include "miniaudio.h"
 #include "canvas.h"
 #include <string.h>
-
-#define IS_UPPER(c) (c >= 'A' && c <= 'Z')
-#define TO_UPPER(c) { c += 'A' - 'a'; }
-#define TO_LOWER(c) { c += 'a' - 'A'; }
-#define LOWER(c)    ( c +  'a' - 'A'  )
+#include <ctype.h>
 
 #define BIG_WORDS_PATH "big_words.txt"
 #define WORDS_PATH     "words.txt"
-#define MAX_WORDS      1000
 
 #define MAX_OFFSET 0.6 * MAX_COLS
-#define ROW_HEIGHT 4
-#define ROW_SPACE  -10
 #define DISTANCE   20
-#define SPEED      0.05
-#define GAP        4
 
 #define MAX_ROWS 4
 #define MAX_COLS 5
@@ -99,10 +89,12 @@ void start_transition(Stage);
 void draw_transition();
 f32  x_angle(vec3, vec3);
 void move_to(vec3, vec3, f32);
+void init_word(TypableWord*, c8*);
 void play_audio(char*);
 void play_audio_loop(char*);
 void stop_audio(char*);
-void preload_audio(char**, u8);
+void set_volume(char*, f32);
+void init_audios(char**, u8);
 
 // ---
 
@@ -130,8 +122,8 @@ Stage transition_to;
 u8 transitioned = 0;
 
 ma_engine engine;
-ma_sound sounds[MAX_SOUNDS];
-c8* sound_names[MAX_SOUNDS];
+ma_sound sounds[100];
+c8* sound_names[100];
 u8 sound_count = 0;
 
 Material m_ship     = { GRAY,          0.5, 0.5 };
@@ -173,11 +165,10 @@ int main() {
 // ---
 
 void init() {
-  ASSERT(ma_engine_init(NULL, &engine) == MA_SUCCESS, "Failed to init audio");
   char* audios[] = { "abduction", "ufo", "key", "enemy", "death", "enter", "miss", "next", "shoot" };
-  preload_audio(audios, LEN(audios));
+  init_audios(audios, LEN(audios));
 
-  canvas_init(&cam, (CanvasInitConfig) { "Type Shooter", 1, 0, 0.8, { 0.05, 0, 0.05 } });
+  canvas_init(&cam, (CanvasInitConfig) { "Type Shooter", 0, 0, 1, { 0.05, 0, 0.05 } });
   glfwSetCharCallback(cam.window, char_press);
   srand((uintptr_t) &cam);
 
@@ -222,20 +213,16 @@ void init() {
 // ---
 
 void stage_start() {
-  if (should_stage_in_event()) {
-    strcpy(play.w, "play");
-    play.prog = 0;
-  }
+  if (should_stage_in_event())
+    init_word(&play, "PLAy");
 
   draw_start();
 }
 
 void stage_mode() {
   if (should_stage_in_event()) {
-    strcpy(normal.w, "normal");
-    normal.prog = 0;
-    strcpy(hardcore.w, "hardcore");
-    hardcore.prog = 0;
+    init_word(&normal,   "normal");
+    init_word(&hardcore, "hardcore");
   }
 
   draw_mode();
@@ -248,7 +235,7 @@ void stage_game() {
     cols = MIN(MAX_COLS, MAX(1, difficulty));
     enemy_bullet_speed = 0.04 + (MIN(10, MAX(1, difficulty - 3))) / 10.0 * 0.1;
     moving = 0;
-    ufo.next_spawn = glfwGetTime() + RAND(5, 10);
+    ufo.next_spawn = glfwGetTime() + RAND(15, 25);
     ufo.stage = 0;
     recoil = 0;
     x_offset = 0;
@@ -262,7 +249,7 @@ void stage_game() {
 
   if (x_offset >  MAX_OFFSET && dir ==  1) dir = -1;
   if (x_offset < -MAX_OFFSET && dir == -1) dir =  1;
-  x_offset += dir * SPEED * (60 / fps);
+  x_offset += dir * 0.05 * (60 / fps);
 
   move_ufo();
   for (u8 i = 0; i < cols; i++) {
@@ -281,21 +268,32 @@ void stage_game() {
 
 void move_ufo() {
   if (ufo.stage == 0 && glfwGetTime() > ufo.next_spawn && !blink) {
+    set_volume("ufo", 0);
     play_audio_loop("ufo");
     ufo.stage = 1;
     VEC3_COPY(VEC3(0, 10, -DISTANCE), ufo.pos);
-    strcpy(ufo.word.w, bwp.words[RAND(0, bwp.size)]);
-    ufo.word.prog = 0;
+    init_word(&ufo.word, bwp.words[RAND(0, bwp.size)]);
   }
 
   else if (ufo.stage == 1) {
+    set_volume("ufo", (10 - ufo.pos[1]) / 60);
     ufo.pos[1] -= 0.05;
     if (ufo.pos[1] <= 6) ufo.stage++;
   }
 
   else if (ufo.stage > 1 && ufo.stage < 5) {
-    ufo.pos[0] += 0.02 * (ufo.stage % 2 ? 1 : -1);
+    ufo.pos[0] += 0.04 * (ufo.stage % 2 ? 1 : -1);
     if (ufo.pos[0] < -MAX_OFFSET*2 || ufo.pos[0] > MAX_OFFSET*2) ufo.stage++;
+  }
+
+  else if (ufo.stage == 5) {
+    set_volume("ufo", (10 - ufo.pos[1]) / 60);
+    ufo.pos[1] += 0.05;
+    if (ufo.pos[1] > 10) {
+      stop_audio("ufo");
+      ufo.word.w[0] = 0;
+      ufo.stage++;
+    }
   }
 
   else if (ufo.stage == 7) {
@@ -308,23 +306,22 @@ void move_ufo() {
       enemies[0][i].next_shoot = glfwGetTime() + RAND(2, 9) + (15 / (0.1 * 60));
       enemies[0][i].bullet.active = 0;
       enemies[0][i].word.w[1] = 0;
-      if (IS_UPPER(enemies[0][i].word.w[0])) TO_LOWER(enemies[0][i].word.w[0]);
+      if (isupper(enemies[0][i].word.w[0])) enemies[0][i].word.w[0] = tolower(enemies[0][i].word.w[0]);
     }
   }
 }
 
 void move_enemy(u8 i, u8 j) {
-  VEC3_COPY(VEC3((j - (cols - 1) / 2.0) * GAP + x_offset * (i % 2 ? 1 : -1) * (rows % 2 ? 1 : -1), i * ROW_HEIGHT, -DISTANCE + i * ROW_SPACE), enemies[i][j].pos);
+  VEC3_COPY(VEC3((j - (cols - 1) / 2.0) * 4 + x_offset * (i % 2 ? 1 : -1) * (rows % 2 ? 1 : -1), i * 4, -DISTANCE + i * -10), enemies[i][j].pos);
 }
 
 void enemy_shoot(u8 i) {
   if (enemies[0][i].next_shoot - glfwGetTime() >= 0 || enemies[0][i].bullet.active || !enemies[0][i].word.w[0]) return;
-  enemies[0][i].bullet.word.prog = 0;
   enemies[0][i].bullet.active = 1;
   VEC3_COPY(enemies[0][i].pos, enemies[0][i].bullet.pos);
   enemies[0][i].bullet.rotation = x_angle(enemies[0][i].bullet.pos, VEC3(0, 0, 0));
-  enemies[0][i].next_shoot = glfwGetTime() + MAX(1, MIN(20, RAND(10, 20) - difficulty)) + (moving ? 15.0 : 5.0) / 15.0 * 0.05;
-  strcpy(enemies[0][i].bullet.word.w, wp.words[RAND(0, wp.size)]);
+  enemies[0][i].next_shoot = glfwGetTime() + MAX(1, MIN(20, RAND(10, 20) - difficulty)) + 5 / 15.0 * 0.05;
+  init_word(&enemies[0][i].bullet.word, wp.words[RAND(0, wp.size)]);
   play_audio("enemy");
 }
 
@@ -373,10 +370,9 @@ void move_player_to_bullet_bullet(u8 i) {
 
 void init_enemies() {
   for (u8 i = 0; i < cols; i++) {
-    enemies[0][i].next_shoot = glfwGetTime() + RAND(2, 9) + (15 / (0.1 * 60));
+    enemies[0][i].next_shoot = glfwGetTime() + RAND(2, 9) + ((moving ? 15 : 5) / (0.1 * 60));
     enemies[0][i].bullet.active = 0;
-    enemies[0][i].word.prog = 0;
-    strcpy(enemies[0][i].word.w, wp.words[RAND(0, wp.size)]);
+    init_word(&enemies[0][i].word, wp.words[RAND(0, wp.size)]);
   }
 }
 
@@ -394,8 +390,9 @@ void move_rows() {
 }
 
 u8 insert_input(TypableWord* word, u32 key) {
+  if (blink || ufo.abducting) return 0;
   for (u8 i = 0; word->w[i]; i++) {
-    if (IS_UPPER(word->w[i])) continue;
+    if (isupper(word->w[i])) continue;
 
     else if (word->w[i] == key) {
       play_audio("key");
@@ -403,15 +400,15 @@ u8 insert_input(TypableWord* word, u32 key) {
         word->w[0] = 0;
         return 3;
       }
-      TO_UPPER(word->w[i]);
+      word->w[i] = toupper(word->w[i]);
       word->prog += 0.1;
       return 2;
     }
 
     else {
       for (i8 j = i - 1; j >= 0; j--)
-        if (j != 0 || LOWER(word->w[j]) != key)
-          TO_LOWER(word->w[j]);
+        if (j != 0 || tolower(word->w[j]) != key)
+          word->w[j] = tolower(word->w[j]);
       if (i > 1) play_audio("miss");
       word->prog = 0;
       return 1;
@@ -477,7 +474,6 @@ void draw_game() {
   }
   if (ufo.abducting || blink) return;
 
-  draw_ship();
   draw_stars();
 
   if (ufo.stage) {
@@ -521,6 +517,7 @@ void draw_game() {
     if (enemies[0][i].bullet.active)
       draw_text(enemies[0][i].bullet.word.w, VEC3(enemies[0][i].bullet.pos[0] - canvas_text_width(enemies[0][i].bullet.word.w, font, 0.01) / 2, enemies[0][i].bullet.pos[1] - 1.3, enemies[0][i].bullet.pos[2]), font, m_text, 0.01, (vec3) PURPLE, enemies[0][i].bullet.word.prog);
   }
+  draw_ship();
   draw_transition();
 }
 
@@ -588,7 +585,7 @@ void draw_text(c8* word, vec3 pos, Font font, Material mat, f32 size, vec3 typed
 
   c8 typed[32];
   u8 j = 0;
-  for (; IS_UPPER(word[j]); j++) typed[j] = word[j];
+  for (; isupper(word[j]); j++) typed[j] = word[j];
   typed[j] = 0;
 
   vec3 _c;
@@ -658,6 +655,11 @@ void move_to(vec3 from, vec3 to, f32 speed) {
   glm_vec3_add(from, dir, from);
 }
 
+void init_word(TypableWord* word, c8* text) {
+  strcpy(word->w, text);
+  word->prog = 0;
+}
+
 // ---
 
 void play_audio(c8* name) {
@@ -673,7 +675,6 @@ void play_audio_loop(c8* name) {
   for (int i = 0; i < sound_count; i++) {
     if (strcmp(sound_names[i], name) == 0) {
       ma_sound_set_looping(&sounds[i], 1);
-      ma_sound_set_volume(&sounds[i], 0.1);
       ma_sound_start(&sounds[i]);
       return;
     }
@@ -689,9 +690,19 @@ void stop_audio(c8* name) {
   }
 }
 
-void preload_audio(c8** names, u8 amount) {
+void set_volume(char* name, f32 volume) {
+  for (int i = 0; i < sound_count; i++) {
+    if (strcmp(sound_names[i], name) == 0) {
+      ma_sound_set_volume(&sounds[i], volume);
+      return;
+    }
+  }
+}
+
+void init_audios(c8** names, u8 amount) {
+  ASSERT(ma_engine_init(NULL, &engine) == MA_SUCCESS, "Failed to init audio");
   for (u8 i = 0; i < amount; i++) {
-    ASSERT(sound_count < MAX_SOUNDS, "Using more sounds than max");
+    ASSERT(sound_count < 100, "Using more sounds than max");
     c8 buffer[64] = { 0 };
     sprintf(buffer, "wav/%s.wav", names[i]);
     ASSERT(ma_sound_init_from_file(&engine, buffer, 0, NULL, NULL, &sounds[sound_count]) == MA_SUCCESS, "Failed to load %s", names[i]);
