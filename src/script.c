@@ -1,6 +1,3 @@
-// TODO
-// Different enemies
-
 #define MINIAUDIO_IMPLEMENTATION
 #define MAX_SOUNDS 10
 #include "miniaudio.h"
@@ -283,7 +280,7 @@ void stage_game() {
 // ---
 
 void move_ufo() {
-  if (ufo.stage == 0 && glfwGetTime() > ufo.next_spawn) {
+  if (ufo.stage == 0 && glfwGetTime() > ufo.next_spawn && !blink) {
     play_audio_loop("ufo");
     ufo.stage = 1;
     VEC3_COPY(VEC3(0, 10, -DISTANCE), ufo.pos);
@@ -348,7 +345,7 @@ void move_enemy_bullet(u8 i) {
 
 void check_enemies() {
   for (u8 i = 0; i < cols; i++) {
-    if (enemies[0][i].word.w[0]) break;
+    if (enemies[0][i].word.w[0] || bullets[0][i].active) break;
     if (i != cols - 1) continue;
     move_rows();
   }
@@ -396,26 +393,27 @@ void move_rows() {
   init_enemies();
 }
 
-u8 insert_input(c8* word, u32 key) {
-  for (u8 i = 0; word[i]; i++) {
-    if (IS_UPPER(word[i])) continue;
+u8 insert_input(TypableWord* word, u32 key) {
+  for (u8 i = 0; word->w[i]; i++) {
+    if (IS_UPPER(word->w[i])) continue;
 
-    else if (word[i] == key) {
+    else if (word->w[i] == key) {
       play_audio("key");
-      if (!word[i + 1]) {
-        play_audio(stage == GAME_SCREEN ? "shoot" : "enter");
-        word[0] = 0;
+      if (!word->w[i + 1]) {
+        word->w[0] = 0;
         return 3;
       }
-      TO_UPPER(word[i]);
+      TO_UPPER(word->w[i]);
+      word->prog += 0.1;
       return 2;
     }
 
     else {
       for (i8 j = i - 1; j >= 0; j--)
-        if (j != 0 || LOWER(word[j]) != key)
-          TO_LOWER(word[j]);
+        if (j != 0 || LOWER(word->w[j]) != key)
+          TO_LOWER(word->w[j]);
       if (i > 1) play_audio("miss");
+      word->prog = 0;
       return 1;
     }
   }
@@ -431,40 +429,39 @@ void shot(u8 bullet, u8 target) {
 void char_press(GLFWwindow* window, u32 key) {
   if (stage == GAME_SCREEN) {
     for (u8 i = 0; i < cols; i++) {
-      u8 r = insert_input(enemies[0][i].word.w, key);
-      if (r == 1) enemies[0][i].word.prog = 0;
-      if (r == 2) enemies[0][i].word.prog += 0.1;
-      if (r == 3) shot(0, i);
+      u8 r = insert_input(&enemies[0][i].word, key);
+      if (r == 3) {
+        shot(0, i);
+        play_audio("shoot");
+      }
 
-      r = insert_input(enemies[0][i].bullet.word.w, key);
-      if (r == 1) enemies[0][i].bullet.word.prog = 0;
-      if (r == 2) enemies[0][i].bullet.word.prog += 0.1;
-      if (r == 3) shot(1, i);
+      r = insert_input(&enemies[0][i].bullet.word, key);
+      if (r == 3) {
+        shot(1, i);
+        play_audio("shoot");
+      }
     }
-    u8 r = insert_input(ufo.word.w, key);
-    if (r == 1) ufo.word.prog = 0;
-    if (r == 2) ufo.word.prog += 0.1;
+    u8 r = insert_input(&ufo.word, key);
     if (r == 3) ufo.stage = 7;
   }
   else if (stage == START_SCREEN) {
-    u8 r = insert_input(play.w, key);
-    if (r == 1) play.prog = 0;
-    if (r == 2) play.prog += 0.1;
-    if (r == 3) start_transition(MODE_SCREEN);
+    u8 r = insert_input(&play, key);
+    if (r == 3) {
+      play_audio("enter");
+      start_transition(MODE_SCREEN);
+    }
   }
   else if (stage == MODE_SCREEN) {
-    u8 r = insert_input(normal.w, key);
-    if (r == 1) normal.prog = 0;
-    if (r == 2) normal.prog += 0.1;
+    u8 r = insert_input(&normal, key);
     if (r == 3) {
       difficulty = 0;
+      play_audio("enter");
       start_transition(GAME_SCREEN);
     }
-    r = insert_input(hardcore.w, key);
-    if (r == 1) hardcore.prog = 0;
-    if (r == 2) hardcore.prog += 0.1;
+    r = insert_input(&hardcore, key);
     if (r == 3) {
       difficulty = 5;
+      play_audio("enter");
       start_transition(GAME_SCREEN);
     }
   }
@@ -512,7 +509,7 @@ void draw_game() {
         u8 danger = 0;
         f32 remain = -1 -enemies[0][j].bullet.pos[2];
 
-        if (remain < 1 || (remain < 10 && sin(200 / (fabs(remain) + 1)) > 0)) { danger = 1; PRINT("%f", remain); }
+        if (remain < 1 || (remain < 10 && sin(200 / (fabs(remain) + 1)) > 0)) danger = 1;
         canvas_set_material(shader, danger ? m_bullet_d : m_bullet_e);
         draw_bullet(bullet, enemies[0][j].bullet.pos, enemies[0][j].bullet.rotation);
       }
