@@ -13,7 +13,7 @@
 #define TO_LOWER(c) { c += 'a' - 'A'; }
 #define LOWER(c)    ( c +  'a' - 'A'  )
 
-#define WORDS_PATH "../words.txt"
+#define WORDS_PATH "words.txt"
 #define MAX_WORDS  1000
 
 #define MAX_OFFSET 0.6 * MAX_COLS
@@ -165,13 +165,13 @@ int main() {
 
 void init() {
   ASSERT(ma_engine_init(NULL, &engine) == MA_SUCCESS, "Failed to init audio");
-  preload_audio("../key.wav");
-  preload_audio("../enemy.wav");
-  preload_audio("../death.wav");
-  preload_audio("../enter.wav");
-  preload_audio("../miss.wav");
-  preload_audio("../next.wav");
-  preload_audio("../shoot.wav");
+  preload_audio("key");
+  preload_audio("enemy");
+  preload_audio("death");
+  preload_audio("enter");
+  preload_audio("miss");
+  preload_audio("next");
+  preload_audio("shoot");
 
   canvas_init(&cam, (CanvasInitConfig) { "Type Shooter", 1, 0, 0.8, { 0.05, 0, 0.05 } });
   glfwSetCharCallback(cam.window, char_press);
@@ -234,18 +234,18 @@ void stage_game() {
     difficulty++;
     rows = MIN(MAX_ROWS, 1 + difficulty);
     cols = MIN(MAX_COLS, MAX(2, difficulty));
-    enemy_bullet_speed = 0.04 + (MIN(10, MAX(1, difficulty - 3)) / (moving ? 15.0 : 5.0) * 0.05);
+    enemy_bullet_speed = 0.04 + (MIN(10, MAX(1, difficulty - 3))) * 0.03;
     moving = 0;
     init_enemies();
   }
 
   // Decrease stuff
-  if (recoil) recoil = MAX(recoil - 0.001, 0);
-  if (blink)  blink  = MAX(blink  - 0.100, 0);
+  if (recoil) recoil = MAX(recoil - 0.001 * (60 / fps), 0);
+  if (blink)  blink  = MAX(blink  - 0.100 * (60 / fps), 0);
 
   if (x_offset >  MAX_OFFSET && dir ==  1) dir = -1;
   if (x_offset < -MAX_OFFSET && dir == -1) dir =  1;
-  x_offset += dir * SPEED;
+  x_offset += dir * SPEED * (60 / fps);
 
   for (u8 i = 0; i < cols; i++) {
     for (u8 j = 0; j < rows; j++)
@@ -271,19 +271,19 @@ void enemy_shoot(u8 i) {
   enemies[0][i].bullet.active = 1;
   VEC3_COPY(enemies[0][i].pos, enemies[0][i].bullet.pos);
   enemies[0][i].bullet.rotation = x_angle(enemies[0][i].bullet.pos, VEC3(0, 0, 0));
-  enemies[0][i].next_shoot = glfwGetTime() + MAX(1, MIN(20, RAND(10, 20) - difficulty));
+  enemies[0][i].next_shoot = glfwGetTime() + MAX(1, MIN(20, RAND(10, 20) - difficulty)) + (moving ? 15.0 : 5.0) / 15.0 * 0.05;
   strcpy(enemies[0][i].bullet.word.w, wp.words[RAND(0, wp.size)]);
-  play_audio("../enemy.wav");
+  play_audio("enemy");
 }
 
 void lose() {
-  play_audio("../death.wav");
+  play_audio("death");
   start_transition(START_SCREEN);
 }
 
 void move_enemy_bullet(u8 i) {
   if (!enemies[0][i].bullet.active) return;
-  move_to(enemies[0][i].bullet.pos, VEC3(0.5 * (i-(cols/2.0)), -0.2, 0), enemy_bullet_speed);
+  move_to(enemies[0][i].bullet.pos, VEC3(0.5 * (i-(cols/2.0)), -0.2, 0), enemy_bullet_speed * (60 / fps));
 
   if (enemies[0][i].bullet.pos[2] <  - 1) return;
   enemies[0][i].bullet.active = 0;
@@ -300,7 +300,7 @@ void check_enemies() {
 
 void move_player_to_enemy_bullet(u8 i) {
   if (!bullets[0][i].active) return;
-  move_to(bullets[0][i].pos, enemies[0][i].pos, 0.8);
+  move_to(bullets[0][i].pos, enemies[0][i].pos, 0.8 * (60 / fps));
   bullets[0][i].rotation = x_angle(enemies[0][i].pos, bullets[0][i].pos);
 
   if (bullets[0][i].pos[2] > -DISTANCE+1) return;
@@ -310,7 +310,7 @@ void move_player_to_enemy_bullet(u8 i) {
 
 void move_player_to_bullet_bullet(u8 i) {
   if (!bullets[1][i].active) return;
-  move_to(bullets[1][i].pos, enemies[0][i].bullet.pos, 0.8);
+  move_to(bullets[1][i].pos, enemies[0][i].bullet.pos, 0.8 * (60 / fps));
   bullets[1][i].rotation = x_angle(enemies[0][i].bullet.pos, bullets[1][i].pos);
 
   if (bullets[1][i].pos[2] - enemies[0][i].bullet.pos[2] > 0.5) return;
@@ -332,7 +332,7 @@ void move_rows() {
   rows = rows - 1;
   if (!rows) {
     set_stage(GAME_SCREEN);
-    play_audio("../next.wav");
+    play_audio("next");
     blink = 15;
     moving = 1;
   }
@@ -344,9 +344,9 @@ u8 insert_input(c8* word, u32 key) {
     if (IS_UPPER(word[i])) continue;
 
     else if (word[i] == key) {
-      play_audio("../key.wav");
+      play_audio("key");
       if (!word[i + 1]) {
-        play_audio(stage == GAME_SCREEN ? "../shoot.wav" : "../enter.wav");
+        play_audio(stage == GAME_SCREEN ? "shoot" : "enter");
         word[0] = 0;
         return 3;
       }
@@ -358,7 +358,7 @@ u8 insert_input(c8* word, u32 key) {
       for (i8 j = i - 1; j >= 0; j--)
         if (j != 0 || LOWER(word[j]) != key)
           TO_LOWER(word[j]);
-      if (i > 1) play_audio("../miss.wav");
+      if (i > 1) play_audio("miss");
       return 1;
     }
   }
@@ -433,10 +433,10 @@ void draw_game() {
         draw_bullet(bullet, bullets[1][j].pos, bullets[1][j].rotation);
 
       u8 danger = 0;
-      if      (enemies[0][j].bullet.pos[2] >= - 1 -  40 * enemy_bullet_speed) {                                  danger = 1; }
-      else if (enemies[0][j].bullet.pos[2] >= - 1 - 120 * enemy_bullet_speed) { if (sin(glfwGetTime() * 30) > 0) danger = 1; }
-      else if (enemies[0][j].bullet.pos[2] >= - 1 - 180 * enemy_bullet_speed) { if (sin(glfwGetTime() * 20) > 0) danger = 1; }
-      else if (enemies[0][j].bullet.pos[2] >= - 1 - 240 * enemy_bullet_speed) { if (sin(glfwGetTime() * 10) > 0) danger = 1; }
+      if      (enemies[0][j].bullet.pos[2] >= - 1 -  30 * enemy_bullet_speed * (60 / fps)) {                                  danger = 1; }
+      else if (enemies[0][j].bullet.pos[2] >= - 1 -  60 * enemy_bullet_speed * (60 / fps)) { if (sin(glfwGetTime() * 30) > 0) danger = 1; }
+      else if (enemies[0][j].bullet.pos[2] >= - 1 - 120 * enemy_bullet_speed * (60 / fps)) { if (sin(glfwGetTime() * 20) > 0) danger = 1; }
+      else if (enemies[0][j].bullet.pos[2] >= - 1 - 180 * enemy_bullet_speed * (60 / fps)) { if (sin(glfwGetTime() * 10) > 0) danger = 1; }
       canvas_set_material(shader, danger ? m_bullet_d : m_bullet_e);
 
       if (enemies[0][j].bullet.active)
@@ -588,18 +588,20 @@ void move_to(vec3 from, vec3 to, f32 speed) {
 
 // ---
 
-void play_audio(c8* filename) {
+void play_audio(c8* name) {
   for (int i = 0; i < sound_count; i++) {
-    if (strcmp(sound_names[i], filename) == 0) {
+    if (strcmp(sound_names[i], name) == 0) {
       ma_sound_start(&sounds[i]);
       return;
     }
   }
 }
 
-void preload_audio(c8* filename) {
+void preload_audio(c8* name) {
   ASSERT(sound_count < MAX_SOUNDS, "Using more sounds than max");
-  ASSERT(ma_sound_init_from_file(&engine, filename, 0, NULL, NULL, &sounds[sound_count]) == MA_SUCCESS, "Failed to load %s", filename);
-  sound_names[sound_count] = strdup(filename);
+  c8 buffer[64] = { 0 };
+  sprintf(buffer, "wav/%s.wav", name);
+  ASSERT(ma_sound_init_from_file(&engine, buffer, 0, NULL, NULL, &sounds[sound_count]) == MA_SUCCESS, "Failed to load %s", name);
+  sound_names[sound_count] = strdup(name);
   sound_count++;
 }

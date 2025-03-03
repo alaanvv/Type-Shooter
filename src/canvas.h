@@ -8,7 +8,7 @@
 #define MAX(x, y) (x > y ? x : y)
 #define CLAMP(x, y, z) (MAX(MIN(z, y), x))
 #define CIRCULAR_CLAMP(x, y, z) ((y < x) ? z : ((y > z) ? x : y))
-#define RAND(min, max) (random() % (max - min) + min)
+#define RAND(min, max) (rand() % (max - min) + min)
 #define PRINT(...) { printf(__VA_ARGS__); printf("\n"); }
 #define ASSERT(x, ...) if (!(x)) { PRINT(__VA_ARGS__); exit(1); }
 #define VEC2_COPY(v1, v2) { v2[0] = v1[0]; v2[1] = v1[1]; }
@@ -59,7 +59,7 @@ void canvas_vertex_attrib_pointer(u8, u8, GLenum, GLenum, u16, void*);
 // Canvas
 
 typedef struct {
-  f32 fov, near, far, pitch, yaw;
+  f32 fov, near_plane, far_plane, pitch, yaw;
   vec3 pos, dir, rig;
   u16 width, height;
   GLFWwindow* window;
@@ -121,7 +121,7 @@ void canvas_init(Camera* cam, CanvasInitConfig config) {
 
 void generate_proj_mat(Camera* cam, u32 shader) {
   glm_mat4_identity(cam->proj);
-  glm_perspective(cam->fov, (f32) cam->width / cam->height, cam->near, cam->far, cam->proj);
+  glm_perspective(cam->fov, (f32) cam->width / cam->height, cam->near_plane, cam->far_plane, cam->proj);
   glUniformMatrix4fv(UNI(shader, "PROJ"), 1, GL_FALSE, cam->proj[0]);
 }
 
