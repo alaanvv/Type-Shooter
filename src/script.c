@@ -135,7 +135,7 @@ Material m_text     = { PASTEL_GREEN,  .lig = 1 };
 Material m_text_w   = { PURPLE,        .lig = 1 };
 DirLig light        = { WHITE,    { 0, 0 , -1 } };
 Font font           = { GL_TEXTURE0, 60, 30, 5, 7.0 / 5 };
-Model* ship, * enemy, * bullet, * star;
+Model* ship, * enemy, * enemy_2, * bullet, * star;
 u32 lowres_fbo;
 
 // ---
@@ -176,10 +176,11 @@ void init() {
   glfwSetCharCallback(cam.window, char_press);
   srand((uintptr_t) &cam);
 
-  ship   = model_create("obj/ship.obj",  &m_ship,   1);
-  enemy  = model_create("obj/enemy.obj", &m_enemy,  1);
-  bullet = model_create("obj/cube.obj",  &m_bullet, 1);
-  star   = model_create("obj/star.obj",  &m_star,   1);
+  ship    = model_create("obj/ship.obj",    &m_ship,   1);
+  enemy   = model_create("obj/enemy.obj",   &m_enemy,  1);
+  enemy_2 = model_create("obj/enemy_2.obj", &m_enemy,  1);
+  bullet  = model_create("obj/cube.obj",    &m_bullet, 1);
+  star    = model_create("obj/star.obj",    &m_star,   1);
 
   canvas_create_texture(GL_TEXTURE0, "img/font.ppm",  TEXTURE_DEFAULT);
 
@@ -419,9 +420,10 @@ void draw_game() {
   for (u8 i = 0; i < rows; i++)
     for (u8 j = 0; j < cols; j++) {
       if (i || enemies[i][j].word.w[0] || bullets[i][j].active) {
-        model_bind(enemy, shader);
-        glm_translate(enemy->model, enemies[i][j].pos);
-        model_draw(enemy, shader);
+        Model* model = (sin(glfwGetTime() * 3) * ((j + i) % 2 ? -1 : 1)) > 0 ? enemy : enemy_2;
+        model_bind(model, shader);
+        glm_translate(model->model, enemies[i][j].pos);
+        model_draw(model, shader);
       }
 
       model_bind(bullet, shader);
@@ -433,9 +435,9 @@ void draw_game() {
 
       u8 danger = 0;
       if      (enemies[0][j].bullet.pos[2] >= - 1 -  30 * enemy_bullet_speed * (60 / fps)) {                                  danger = 1; }
-      else if (enemies[0][j].bullet.pos[2] >= - 1 -  60 * enemy_bullet_speed * (60 / fps)) { if (sin(glfwGetTime() * 30) > 0) danger = 1; }
-      else if (enemies[0][j].bullet.pos[2] >= - 1 - 120 * enemy_bullet_speed * (60 / fps)) { if (sin(glfwGetTime() * 20) > 0) danger = 1; }
-      else if (enemies[0][j].bullet.pos[2] >= - 1 - 180 * enemy_bullet_speed * (60 / fps)) { if (sin(glfwGetTime() * 10) > 0) danger = 1; }
+      else if (enemies[0][j].bullet.pos[2] >= - 1 -  60 * enemy_bullet_speed * (60 / fps)) { if (sin(glfwGetTime() * 20) > 0) danger = 1; }
+      else if (enemies[0][j].bullet.pos[2] >= - 1 - 120 * enemy_bullet_speed * (60 / fps)) { if (sin(glfwGetTime() * 10) > 0) danger = 1; }
+      else if (enemies[0][j].bullet.pos[2] >= - 1 - 180 * enemy_bullet_speed * (60 / fps)) { if (sin(glfwGetTime() *  2) > 0) danger = 1; }
       canvas_set_material(shader, danger ? m_bullet_d : m_bullet_e);
 
       if (enemies[0][j].bullet.active)
