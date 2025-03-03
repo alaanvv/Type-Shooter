@@ -17,7 +17,11 @@ target_include_directories("Script" PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/inc")
 target_include_directories("Script" PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/inc/glfw")
 target_include_directories("Script" PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/inc/glad")
 target_include_directories("Script" PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/inc/cglm")
+target_include_directories("Script" PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/inc/miniaudio")
 
+if(UNIX)
+    target_link_libraries("Script" PRIVATE pthread dl)
+endif()
 target_link_libraries("Script" PRIVATE cglm glfw glad)
 
 file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/src/shd" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")

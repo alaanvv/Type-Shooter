@@ -1,8 +1,10 @@
 // TODO
 // Different enemies
 // Crosshair
-// Add songs
 
+#define MINIAUDIO_IMPLEMENTATION
+#define MAX_SOUNDS 8
+#include "miniaudio.h"
 #include "canvas.h"
 #include <string.h>
 
@@ -10,8 +12,6 @@
 #define TO_UPPER(c) { c += 'A' - 'a'; }
 #define TO_LOWER(c) { c += 'a' - 'A'; }
 #define LOWER(c)    ( c +  'a' - 'A'  )
-
-#define UPSCALE 1
 
 #define WORDS_PATH "../words.txt"
 #define MAX_WORDS  1000
@@ -29,7 +29,7 @@
 // ---
 
 typedef enum {
-  START_SCREEN, MODE_SCREEN, GAME_SCREEN, END_SCREEN
+  START_SCREEN, MODE_SCREEN, GAME_SCREEN
 } Stage;
 
 typedef struct {
@@ -94,10 +94,12 @@ int  should_stage_in_event();
 void set_stage(Stage stage);
 void start_transition(Stage to);
 void draw_transition();
+void preload_audio(char*);
+void play_audio(char*);
 
 // ---
 
-TypableWord play, easy, normal, hardcore;
+TypableWord play, normal, hardcore;
 Enemy  enemies[MAX_ROWS][MAX_COLS];
 Bullet bullets[2][MAX_COLS];
 WordPack wp = { 0 };
@@ -108,6 +110,7 @@ u8 stage_in_event;
 f32 recoil = 0, blink = 0, x_offset = 0, enemy_bullet_speed;
 u8 rows = MAX_ROWS, cols = MAX_COLS, difficulty = 0;
 i8 dir = 1;
+u8 moving = 0;
 
 // ---
 
@@ -117,6 +120,11 @@ f32  fps;
 Animation transition = { 0, 0, 0.5 };
 Stage transition_to;
 u8 transitioned = 0;
+
+ma_engine engine;
+ma_sound sounds[MAX_SOUNDS];
+c8* sound_names[MAX_SOUNDS];
+u8 sound_count = 0;
 
 Material m_ship     = { GRAY,          0.5, 0.5 };
 Material m_enemy    = { DEEP_GREEN,    0.5, 0.5 };
@@ -156,6 +164,15 @@ int main() {
 // ---
 
 void init() {
+  ASSERT(ma_engine_init(NULL, &engine) == MA_SUCCESS, "Failed to init audio");
+  preload_audio("../key.wav");
+  preload_audio("../enemy.wav");
+  preload_audio("../death.wav");
+  preload_audio("../enter.wav");
+  preload_audio("../miss.wav");
+  preload_audio("../next.wav");
+  preload_audio("../shoot.wav");
+
   canvas_init(&cam, (CanvasInitConfig) { "Type Shooter", 1, 0, 0.8, { 0.05, 0, 0.05 } });
   glfwSetCharCallback(cam.window, char_press);
   srand((uintptr_t) &cam);
@@ -175,9 +192,6 @@ void init() {
   generate_view_mat(&cam, shader);
   canvas_set_dir_lig(shader, light, 0);
 
-  lowres_fbo = canvas_create_FBO(cam.width * UPSCALE, cam.height * UPSCALE, GL_NEAREST, GL_NEAREST);
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
   // ---
 
   for (u8 i = 0; i < LEN(stars); i++)
@@ -185,7 +199,7 @@ void init() {
 
   FILE *file = fopen(WORDS_PATH, "r");
   ASSERT(file, "Error opening words");
-  char buffer[32];
+  c8 buffer[32];
   while (wp.size < LEN(wp.words) && fscanf(file, "%s", buffer) == 1)
     strcpy(wp.words[wp.size++], buffer);
   fclose(file);
@@ -206,8 +220,6 @@ void stage_start() {
 
 void stage_mode() {
   if (should_stage_in_event()) {
-    strcpy(easy.w, "easy");
-    easy.prog = 0;
     strcpy(normal.w, "normal");
     normal.prog = 0;
     strcpy(hardcore.w, "hardcore");
@@ -222,7 +234,8 @@ void stage_game() {
     difficulty++;
     rows = MIN(MAX_ROWS, 1 + difficulty);
     cols = MIN(MAX_COLS, MAX(2, difficulty));
-    enemy_bullet_speed = 0.04 + (MIN(10, MAX(1, difficulty - 3)) / 10.0 * 0.05);
+    enemy_bullet_speed = 0.04 + (MIN(10, MAX(1, difficulty - 3)) / (moving ? 15.0 : 5.0) * 0.05);
+    moving = 0;
     init_enemies();
   }
 
@@ -260,9 +273,11 @@ void enemy_shoot(u8 i) {
   enemies[0][i].bullet.rotation = x_angle(enemies[0][i].bullet.pos, VEC3(0, 0, 0));
   enemies[0][i].next_shoot = glfwGetTime() + MAX(1, MIN(20, RAND(10, 20) - difficulty));
   strcpy(enemies[0][i].bullet.word.w, wp.words[RAND(0, wp.size)]);
+  play_audio("../enemy.wav");
 }
 
 void lose() {
+  play_audio("../death.wav");
   start_transition(START_SCREEN);
 }
 
@@ -305,7 +320,7 @@ void move_player_to_bullet_bullet(u8 i) {
 
 void init_enemies() {
   for (u8 i = 0; i < cols; i++) {
-    enemies[0][i].next_shoot = glfwGetTime() + RAND(2, 9) + (5 / (0.1 * 60));
+    enemies[0][i].next_shoot = glfwGetTime() + RAND(2, 9) + (15 / (0.1 * 60));
     enemies[0][i].bullet.active = 0;
     enemies[0][i].word.prog = 0;
     strcpy(enemies[0][i].word.w, wp.words[RAND(0, wp.size)]);
@@ -315,16 +330,23 @@ void init_enemies() {
 void move_rows() {
   blink = 5;
   rows = rows - 1;
-  if (!rows) set_stage(GAME_SCREEN);
+  if (!rows) {
+    set_stage(GAME_SCREEN);
+    play_audio("../next.wav");
+    blink = 15;
+    moving = 1;
+  }
   init_enemies();
 }
 
-u8 insert_input(char* word, u32 key) {
+u8 insert_input(c8* word, u32 key) {
   for (u8 i = 0; word[i]; i++) {
     if (IS_UPPER(word[i])) continue;
 
     else if (word[i] == key) {
+      play_audio("../key.wav");
       if (!word[i + 1]) {
+        play_audio(stage == GAME_SCREEN ? "../shoot.wav" : "../enter.wav");
         word[0] = 0;
         return 3;
       }
@@ -336,6 +358,7 @@ u8 insert_input(char* word, u32 key) {
       for (i8 j = i - 1; j >= 0; j--)
         if (j != 0 || LOWER(word[j]) != key)
           TO_LOWER(word[j]);
+      if (i > 1) play_audio("../miss.wav");
       return 1;
     }
   }
@@ -369,18 +392,11 @@ void char_press(GLFWwindow* window, u32 key) {
     if (r == 3) start_transition(MODE_SCREEN);
   }
   else if (stage == MODE_SCREEN) {
-    u8 r = insert_input(easy.w, key);
-    if (r == 1) easy.prog = 0;
-    if (r == 2) easy.prog += 0.1;
-    if (r == 3) {
-      difficulty = 0;
-      start_transition(GAME_SCREEN);
-    }
-    r = insert_input(normal.w, key);
+    u8 r = insert_input(normal.w, key);
     if (r == 1) normal.prog = 0;
     if (r == 2) normal.prog += 0.1;
     if (r == 3) {
-      difficulty = 2;
+      difficulty = 0;
       start_transition(GAME_SCREEN);
     }
     r = insert_input(hardcore.w, key);
@@ -427,10 +443,6 @@ void draw_game() {
         draw_bullet(bullet, enemies[0][j].bullet.pos, enemies[0][j].bullet.rotation);
     }
 
-  // Lowres
-  glBlitNamedFramebuffer(0, lowres_fbo, 0, 0, cam.width, cam.height, 0, 0, cam.width * UPSCALE, cam.height * UPSCALE, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-  glBlitNamedFramebuffer(lowres_fbo, 0, 0, 0, cam.width * UPSCALE, cam.height * UPSCALE, 0, 0, cam.width, cam.height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-
   glClear(GL_DEPTH_BUFFER_BIT);
   for (u8 i = 0; i < cols; i++) {
     draw_text(enemies[0][i].word.w, VEC3(enemies[0][i].pos[0] - canvas_text_width(enemies[0][i].word.w, font, 0.01) / 2, 1.3, -DISTANCE), font, m_text, 0.01, (vec3) PURPLE, enemies[0][i].word.prog);
@@ -465,9 +477,8 @@ void draw_mode() {
   canvas_draw_text(shader, "type shooter", -canvas_text_width("type shooter", font, 0.05) / 2, 2.9, -DISTANCE - 0.5, 0.05, font, m_text, VEC3(0, 0, 0));
   VEC3_COPY(_c, m_text.col);
 
-  draw_text(easy.w,   VEC3(-canvas_text_width(easy.w,   font, 0.03) / 2, 0, -DISTANCE), font, m_text, 0.03, (vec3) PURPLE, easy.prog);
-  draw_text(normal.w,     VEC3(-canvas_text_width(normal.w,     font, 0.03) / 2, -2.2, -DISTANCE), font, m_text, 0.03, (vec3) PURPLE, normal.prog * 2);
-  draw_text(hardcore.w, VEC3(-canvas_text_width(hardcore.w, font, 0.03) / 2, -4.4, -DISTANCE), font, m_text, 0.03, (vec3) DEEP_RED, hardcore.prog * 3);
+  draw_text(normal.w,     VEC3(-canvas_text_width(normal.w,     font, 0.03) / 2, -1, -DISTANCE), font, m_text, 0.03, (vec3) PURPLE, normal.prog * 2);
+  draw_text(hardcore.w, VEC3(-canvas_text_width(hardcore.w, font, 0.03) / 2, -4, -DISTANCE), font, m_text, 0.03, (vec3) DEEP_RED, hardcore.prog * 3);
 
   draw_stars();
   draw_ship();
@@ -499,7 +510,7 @@ void draw_bullet(Model* model, vec3 pos, f32 rotation) {
   model_draw(model, shader);
 }
 
-void draw_text(char* word, vec3 pos, Font font, Material mat, f32 size, vec3 typed_color, f32 prog) {
+void draw_text(c8* word, vec3 pos, Font font, Material mat, f32 size, vec3 typed_color, f32 prog) {
   pos[0] += sin((glfwGetTime()) * (1 + prog) * 10) * prog * 0.10;
   pos[1] += cos((glfwGetTime()) * (2 + prog) *  8) * prog * 0.13;
 
@@ -573,4 +584,22 @@ void move_to(vec3 from, vec3 to, f32 speed) {
   glm_normalize(dir);
   glm_vec3_scale(dir, speed, dir);
   glm_vec3_add(from, dir, from);
+}
+
+// ---
+
+void play_audio(c8* filename) {
+  for (int i = 0; i < sound_count; i++) {
+    if (strcmp(sound_names[i], filename) == 0) {
+      ma_sound_start(&sounds[i]);
+      return;
+    }
+  }
+}
+
+void preload_audio(c8* filename) {
+  ASSERT(sound_count < MAX_SOUNDS, "Using more sounds than max");
+  ASSERT(ma_sound_init_from_file(&engine, filename, 0, NULL, NULL, &sounds[sound_count]) == MA_SUCCESS, "Failed to load %s", filename);
+  sound_names[sound_count] = strdup(filename);
+  sound_count++;
 }
