@@ -91,7 +91,6 @@ meia
 luva
 oculos
 chapeu
-boné
 sombra
 fogo
 agua

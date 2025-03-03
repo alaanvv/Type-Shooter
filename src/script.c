@@ -1,6 +1,5 @@
 // TODO
 // Different enemies
-// Crosshair
 
 #define MINIAUDIO_IMPLEMENTATION
 #define MAX_SOUNDS 8
@@ -234,7 +233,7 @@ void stage_game() {
     difficulty++;
     rows = MIN(MAX_ROWS, 1 + difficulty);
     cols = MIN(MAX_COLS, MAX(2, difficulty));
-    enemy_bullet_speed = 0.04 + (MIN(10, MAX(1, difficulty - 3))) * 0.03;
+    enemy_bullet_speed = 0.04 + (MIN(10, MAX(1, difficulty - 3))) / 10.0 * 0.1;
     moving = 0;
     init_enemies();
   }
