@@ -2,7 +2,7 @@
 // Different enemies
 
 #define MINIAUDIO_IMPLEMENTATION
-#define MAX_SOUNDS 8
+#define MAX_SOUNDS 10
 #include "miniaudio.h"
 #include "canvas.h"
 #include <string.h>
@@ -12,7 +12,8 @@
 #define TO_LOWER(c) { c += 'a' - 'A'; }
 #define LOWER(c)    ( c +  'a' - 'A'  )
 
-#define WORDS_PATH "words.txt"
+#define BIG_WORDS_PATH "big_words.txt"
+#define WORDS_PATH     "words.txt"
 #define MAX_WORDS  1000
 
 #define MAX_OFFSET 0.6 * MAX_COLS
@@ -70,6 +71,7 @@ typedef struct {
 
 void init();
 void move_enemy(u8 i, u8 j);
+void move_ufo();
 void enemy_shoot(u8 i);
 void move_enemy_bullet(u8 i);
 void move_player_to_enemy_bullet(u8 i);
@@ -95,13 +97,15 @@ void start_transition(Stage to);
 void draw_transition();
 void preload_audio(char*);
 void play_audio(char*);
+void play_audio_loop(char*);
+void stop_audio(char*);
 
 // ---
 
-TypableWord play, normal, hardcore;
+TypableWord play, normal, hardcore, ufo;
 Enemy  enemies[MAX_ROWS][MAX_COLS];
 Bullet bullets[2][MAX_COLS];
-WordPack wp = { 0 };
+WordPack wp = { 0 }, bwp = { 0 };
 vec3 stars[200];
 Stage stage;
 u8 stage_in_event;
@@ -110,6 +114,10 @@ f32 recoil = 0, blink = 0, x_offset = 0, enemy_bullet_speed;
 u8 rows = MAX_ROWS, cols = MAX_COLS, difficulty = 0;
 i8 dir = 1;
 u8 moving = 0;
+f32 next_ufo;
+vec3 ufo_pos;
+f32 ufo_blink;
+u8 ufo_stage;
 
 // ---
 
@@ -127,6 +135,7 @@ u8 sound_count = 0;
 
 Material m_ship     = { GRAY,          0.5, 0.5 };
 Material m_enemy    = { DEEP_GREEN,    0.5, 0.5 };
+Material m_ufo      = { DEEP_RED,      0.5, 0.5 };
 Material m_bullet   = { PURPLE,        0.5, 0.5 };
 Material m_bullet_e = { PASTEL_YELLOW, 0.5, 0.5 };
 Material m_bullet_d = { DEEP_RED,      0.5, 0.5 };
@@ -135,7 +144,7 @@ Material m_text     = { PASTEL_GREEN,  .lig = 1 };
 Material m_text_w   = { PURPLE,        .lig = 1 };
 DirLig light        = { WHITE,    { 0, 0 , -1 } };
 Font font           = { GL_TEXTURE0, 60, 30, 5, 7.0 / 5 };
-Model* ship, * enemy, * enemy_2, * bullet, * star;
+Model* ship, * enemy, * enemy_2, * bullet, * star, * mufo;
 u32 lowres_fbo;
 
 // ---
@@ -164,6 +173,8 @@ int main() {
 
 void init() {
   ASSERT(ma_engine_init(NULL, &engine) == MA_SUCCESS, "Failed to init audio");
+  preload_audio("abduction");
+  preload_audio("ufo");
   preload_audio("key");
   preload_audio("enemy");
   preload_audio("death");
@@ -181,6 +192,7 @@ void init() {
   enemy_2 = model_create("obj/enemy_2.obj", &m_enemy,  1);
   bullet  = model_create("obj/cube.obj",    &m_bullet, 1);
   star    = model_create("obj/star.obj",    &m_star,   1);
+  mufo    = model_create("obj/ufo.obj",     &m_ufo,   1);
 
   canvas_create_texture(GL_TEXTURE0, "img/font.ppm",  TEXTURE_DEFAULT);
 
@@ -202,6 +214,12 @@ void init() {
   c8 buffer[32];
   while (wp.size < LEN(wp.words) && fscanf(file, "%s", buffer) == 1)
     strcpy(wp.words[wp.size++], buffer);
+  fclose(file);
+
+  file = fopen(BIG_WORDS_PATH, "r");
+  ASSERT(file, "Error opening big words");
+  while (bwp.size < LEN(bwp.words) && fscanf(file, "%s", buffer) == 1)
+    strcpy(bwp.words[bwp.size++], buffer);
   fclose(file);
 
   set_stage(START_SCREEN);
@@ -236,17 +254,21 @@ void stage_game() {
     cols = MIN(MAX_COLS, MAX(2, difficulty));
     enemy_bullet_speed = 0.04 + (MIN(10, MAX(1, difficulty - 3))) / 10.0 * 0.1;
     moving = 0;
+    next_ufo = glfwGetTime() + RAND(3, 5);
+    ufo_stage = 0;
     init_enemies();
   }
 
   // Decrease stuff
-  if (recoil) recoil = MAX(recoil - 0.001 * (60 / fps), 0);
-  if (blink)  blink  = MAX(blink  - 0.100 * (60 / fps), 0);
+  if (recoil)    recoil    = MAX(recoil    - 0.001 * (60 / fps), 0);
+  if (blink)     blink     = MAX(blink     - 0.100 * (60 / fps), 0);
+  if (ufo_blink) ufo_blink = MAX(ufo_blink - 0.100 * (60 / fps), 0);
 
   if (x_offset >  MAX_OFFSET && dir ==  1) dir = -1;
   if (x_offset < -MAX_OFFSET && dir == -1) dir =  1;
   x_offset += dir * SPEED * (60 / fps);
 
+  move_ufo();
   for (u8 i = 0; i < cols; i++) {
     for (u8 j = 0; j < rows; j++)
       move_enemy(j, i);
@@ -260,6 +282,41 @@ void stage_game() {
 }
 
 // ---
+
+void move_ufo() {
+  if (ufo_stage == 0 && glfwGetTime() > next_ufo) {
+    play_audio_loop("ufo");
+    ufo_stage = 1;
+    VEC3_COPY(VEC3(0, 10, -DISTANCE), ufo_pos);
+    PRINT("%f %f", ufo_pos[0], glfwGetTime());
+    strcpy(ufo.w, bwp.words[RAND(0, bwp.size)]);
+    ufo.prog = 0;
+  }
+
+  else if (ufo_stage == 1) {
+    ufo_pos[1] -= 0.05;
+    if (ufo_pos[1] <= 6) ufo_stage++;
+  }
+
+  else if (ufo_stage > 1 && ufo_stage < 5) {
+    ufo_pos[0] += 0.02 * (ufo_stage % 2 ? 1 : -1);
+    if (ufo_pos[0] < -MAX_OFFSET*2 || ufo_pos[0] > MAX_OFFSET*2) ufo_stage++;
+  }
+
+  else if (ufo_stage == 7) {
+    stop_audio("ufo");
+    ufo_blink = 10;
+    ufo_pos[1] += 10;
+    ufo_stage = 8;
+    play_audio("abduction");
+    for (u8 i = 0; i < cols; i++) {
+      enemies[0][i].next_shoot = glfwGetTime() + RAND(2, 9) + (15 / (0.1 * 60));
+      enemies[0][i].bullet.active = 0;
+      enemies[0][i].word.w[1] = 0;
+      if (IS_UPPER(enemies[0][i].word.w[0])) TO_LOWER(enemies[0][i].word.w[0]);
+    }
+  }
+}
 
 void move_enemy(u8 i, u8 j) {
   VEC3_COPY(VEC3((j - (cols - 1) / 2.0) * GAP + x_offset * (i % 2 ? 1 : -1) * (rows % 2 ? 1 : -1), i * ROW_HEIGHT, -DISTANCE + i * ROW_SPACE), enemies[i][j].pos);
@@ -384,6 +441,10 @@ void char_press(GLFWwindow* window, u32 key) {
       if (r == 2) enemies[0][i].bullet.word.prog += 0.1;
       if (r == 3) shot(1, i);
     }
+    u8 r = insert_input(ufo.w, key);
+    if (r == 1) ufo.prog = 0;
+    if (r == 2) ufo.prog += 0.1;
+    if (r == 3) ufo_stage = 7;
   }
   else if (stage == START_SCREEN) {
     u8 r = insert_input(play.w, key);
@@ -412,10 +473,23 @@ void char_press(GLFWwindow* window, u32 key) {
 // ---
 
 void draw_game() {
-  if (blink) return;
+  if (ufo_blink) {
+    glUseProgram(hud_shader);
+    hud_draw_rec(hud_shader, 0, (vec3) PASTEL_YELLOW, 0, 0, cam.width, cam.height);
+    glUseProgram(shader);
+  }
+  if (ufo_blink || blink) return;
 
   draw_ship();
   draw_stars();
+
+  if (ufo_stage) {
+    model_bind(mufo, shader);
+    glm_translate(mufo->model, ufo_pos);
+    model_draw(mufo, shader);
+    if (ufo_stage > 1)
+      draw_text(ufo.w, VEC3(ufo_pos[0] - canvas_text_width(ufo.w, font, 0.01) / 2, ufo_pos[1] + 1.1, ufo_pos[2]), font, m_text, 0.01, (vec3) PURPLE, ufo.prog);
+  }
 
   for (u8 i = 0; i < rows; i++)
     for (u8 j = 0; j < cols; j++) {
@@ -593,6 +667,26 @@ void play_audio(c8* name) {
   for (int i = 0; i < sound_count; i++) {
     if (strcmp(sound_names[i], name) == 0) {
       ma_sound_start(&sounds[i]);
+      return;
+    }
+  }
+}
+
+void play_audio_loop(c8* name) {
+  for (int i = 0; i < sound_count; i++) {
+    if (strcmp(sound_names[i], name) == 0) {
+      ma_sound_set_looping(&sounds[i], MA_TRUE); // Enable looping
+      ma_sound_set_volume(&sounds[i], 0.1);
+      ma_sound_start(&sounds[i]);
+      return;
+    }
+  }
+}
+
+void stop_audio(c8* name) {
+  for (int i = 0; i < sound_count; i++) {
+    if (strcmp(sound_names[i], name) == 0) {
+      ma_sound_stop(&sounds[i]); // Stop audio
       return;
     }
   }
