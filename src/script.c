@@ -286,18 +286,18 @@ void move_ufo() {
 
   else if (ufo.stage == 1) {
     set_volume("ufo", (10 - ufo.pos[1]) / 60);
-    ufo.pos[1] -= 0.05;
+    ufo.pos[1] -= 0.05 * (60 / fps);
     if (ufo.pos[1] <= 6) ufo.stage++;
   }
 
   else if (ufo.stage > 1 && ufo.stage < 5) {
-    ufo.pos[0] += 0.04 * (ufo.stage % 2 ? 1 : -1);
+    ufo.pos[0] += 0.04 * (ufo.stage % 2 ? 1 : -1) * (60 / fps);
     if (ufo.pos[0] < -MAX_OFFSET*2 || ufo.pos[0] > MAX_OFFSET*2) ufo.stage++;
   }
 
   else if (ufo.stage == 5) {
     set_volume("ufo", (10 - ufo.pos[1]) / 60);
-    ufo.pos[1] += 0.05;
+    ufo.pos[1] += 0.05 * (60 / fps);
     if (ufo.pos[1] > 10) {
       stop_audio("ufo");
       ufo.word.w[0] = 0;
