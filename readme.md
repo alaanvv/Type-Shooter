@@ -1,11 +1,7 @@
 <div align='center'>
+  <img width='25%' src='https://img.itch.zone/aW1nLzIwMTM0OTM5LnBuZw==/347x500/lRU4vp.png'>
 
-  # Type Shooter
-
-  <img width='25%' src='https://github.com/alaanvv/Image-Database/blob/main/Misc/bottle.gif?raw=true'>
-
-  That image is just a placeholder I'll change it later
-  using only my own engine
+  Typing game
 </div>
 
 ---
