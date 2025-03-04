@@ -91,6 +91,7 @@ f32  x_angle(vec3, vec3);
 void move_to(vec3, vec3, f32);
 void init_word(TypableWord*, c8*);
 void play_audio(char*);
+void play_audio_pitch(c8*, f32);
 void play_audio_loop(char*);
 void stop_audio(char*);
 void set_volume(char*, f32);
@@ -141,9 +142,16 @@ Model* ship, * enemy, * enemy_2, * bullet, * star, * model_ufo;
 u32 lowres_fbo;
 
 // ---
+void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
+  cam.width = width;
+  cam.height = height;
+  glViewport(0, 0, width, height);
+  generate_proj_mat(&cam, shader);
+}
 
 int main() {
   init();
+  glfwSetFramebufferSizeCallback(cam.window, framebuffer_size_callback);
 
   while (!glfwWindowShouldClose(cam.window)) {
     if      (stage == START_SCREEN) stage_start();
@@ -154,6 +162,7 @@ int main() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glfwPollEvents();
     update_fps(&fps);
+    glViewport(0, 0, cam.width, cam.height);
     if (glfwGetKey(cam.window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
       glfwSetWindowShouldClose(cam.window, 1);
   }
@@ -395,7 +404,7 @@ u8 insert_input(TypableWord* word, u32 key) {
     if (isupper(word->w[i])) continue;
 
     else if (word->w[i] == key) {
-      play_audio("key");
+      play_audio_pitch("key", 1 + word->prog);
       if (!word->w[i + 1]) {
         word->w[0] = 0;
         return 3;
@@ -469,7 +478,7 @@ void char_press(GLFWwindow* window, u32 key) {
 void draw_game() {
   if (ufo.abducting) {
     glUseProgram(hud_shader);
-    hud_draw_rec(hud_shader, 0, (vec3) PASTEL_YELLOW, 0, 0, cam.width, cam.height);
+    hud_draw_rec(hud_shader, 0, (vec3) PASTEL_YELLOW, 0, 0, cam.width, cam.height * 2);
     glUseProgram(shader);
   }
   if (ufo.abducting || blink) return;
@@ -671,6 +680,16 @@ void play_audio(c8* name) {
   }
 }
 
+void play_audio_pitch(c8* name, f32 pitch) {
+  for (int i = 0; i < sound_count; i++) {
+    if (strcmp(sound_names[i], name) == 0) {
+      ma_sound_set_pitch(&sounds[i], pitch);
+      ma_sound_start(&sounds[i]);
+      return;
+    }
+  }
+}
+
 void play_audio_loop(c8* name) {
   for (int i = 0; i < sound_count; i++) {
     if (strcmp(sound_names[i], name) == 0) {
@@ -701,6 +720,7 @@ void set_volume(char* name, f32 volume) {
 
 void init_audios(c8** names, u8 amount) {
   ASSERT(ma_engine_init(NULL, &engine) == MA_SUCCESS, "Failed to init audio");
+  ma_engine_set_volume(&engine, 0.1);
   for (u8 i = 0; i < amount; i++) {
     ASSERT(sound_count < 100, "Using more sounds than max");
     c8 buffer[64] = { 0 };

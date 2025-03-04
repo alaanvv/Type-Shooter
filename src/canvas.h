@@ -84,7 +84,6 @@ void canvas_init(Camera* cam, CanvasInitConfig config) {
   const GLFWvidmode* mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
   cam->width  = mode->width  * config.screen_size;
   cam->height = mode->height * config.screen_size;
-
   cam->window = glfwCreateWindow(cam->width, cam->height, config.title, config.fullscreen ? glfwGetPrimaryMonitor() : NULL, NULL);
   glfwMakeContextCurrent(cam->window);
   gladLoadGLLoader((GLADloadproc) glfwGetProcAddress);
